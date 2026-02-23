@@ -145,6 +145,105 @@ def benchmark_training_step(model: nn.Module, input_ids: torch.Tensor, config: B
     return mean_time, std_time
 
 
+def run_memory_profile(config: BenchmarkConfig, profile_mode: str, snapshot_path: str):
+    """
+    Run memory profiling and save snapshot for visualization.
+
+    Args:
+        config: Benchmark configuration
+        profile_mode: "forward" or "training"
+        snapshot_path: Path to save the memory snapshot pickle file
+    """
+    print("\n" + "=" * 70)
+    print("MEMORY PROFILING")
+    print("=" * 70)
+
+    print("\nModel Configuration:")
+    print(f"  vocab_size:     {config.vocab_size}")
+    print(f"  context_length: {config.context_length}")
+    print(f"  d_model:        {config.d_model}")
+    print(f"  num_layers:     {config.num_layers}")
+    print(f"  num_heads:      {config.num_heads}")
+    print(f"  d_ff:           {config.d_ff}")
+
+    print("\nMemory Profile Settings:")
+    print(f"  profile_mode:    {profile_mode}")
+    print(f"  mixed_precision: {config.mixed_precision}")
+    print(f"  snapshot_path:   {snapshot_path}")
+
+    # Create model and data
+    print("\nInitializing model...")
+    model = create_model(config)
+    num_params = sum(p.numel() for p in model.parameters())
+    print(f"  Total parameters: {num_params:,} ({num_params / 1e6:.2f}M)")
+
+    print("\nCreating random batch...")
+    input_ids = create_random_batch(config)
+
+    autocast_ctx = get_autocast_context(config)
+
+    # Warmup (before recording to get clean snapshot)
+    print("\nRunning warmup...")
+    if profile_mode == "forward":
+        for _ in range(config.warmup_steps):
+            with torch.no_grad(), autocast_ctx:
+                _ = model(input_ids)
+            torch.cuda.synchronize()
+    else:  # training
+        optimizer = AdamW(model.parameters(), lr=1e-4)
+        for _ in range(config.warmup_steps):
+            model.zero_grad()
+            with autocast_ctx:
+                logits = model(input_ids)
+                loss = logits.sum()
+            loss.backward()
+            optimizer.step()
+            torch.cuda.synchronize()
+
+    # Clear memory stats before profiling
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.empty_cache()
+
+    # Start recording memory history
+    print("\nStarting memory recording...")
+    torch.cuda.memory._record_memory_history(max_entries=1000000)
+
+    # Run single iteration for profiling
+    print(f"Running {profile_mode} pass...")
+    if profile_mode == "forward":
+        with torch.no_grad(), autocast_ctx:
+            _ = model(input_ids)
+        torch.cuda.synchronize()
+    else:  # training
+        if 'optimizer' not in locals():
+            optimizer = AdamW(model.parameters(), lr=1e-4)
+        model.zero_grad()
+        with autocast_ctx:
+            logits = model(input_ids)
+            loss = logits.sum()
+        loss.backward()
+        optimizer.step()
+        torch.cuda.synchronize()
+
+    # Save memory snapshot
+    print(f"\nSaving memory snapshot to {snapshot_path}...")
+    torch.cuda.memory._dump_snapshot(snapshot_path)
+
+    # Stop recording
+    torch.cuda.memory._record_memory_history(enabled=None)
+
+    # Report peak memory
+    peak_memory = torch.cuda.max_memory_allocated() / (1024 ** 2)  # Convert to MB
+    print(f"\nPeak memory usage: {peak_memory:.2f} MB")
+
+    print("\n" + "=" * 70)
+    print(f"Memory snapshot saved to: {snapshot_path}")
+    print("Visualize at: https://pytorch.org/memory_viz")
+    print("=" * 70)
+
+    return {"peak_memory_mb": peak_memory}
+
+
 def run_benchmark(config: BenchmarkConfig, profile_mode: str = "all"):
     """
     Run the complete benchmark.
@@ -278,6 +377,19 @@ def parse_args():
         help="Enable detailed NVTX profiling of attention components (softmax, matmul)",
     )
 
+    # Memory profiling
+    parser.add_argument(
+        "--profile-memory",
+        action="store_true",
+        help="Run memory profiling instead of timing benchmarks",
+    )
+    parser.add_argument(
+        "--memory-snapshot-path",
+        type=str,
+        default="memory_snapshot.pickle",
+        help="Path to save memory snapshot pickle file",
+    )
+
     # Device and seed
     parser.add_argument(
         "--device",
@@ -329,4 +441,13 @@ if __name__ == "__main__":
         **config_kwargs,
     )
 
-    run_benchmark(config, profile_mode=args.profile_mode)
+    # Run memory profiling or regular benchmarking
+    if args.profile_memory:
+        if args.profile_mode not in ("forward", "training"):
+            print("Warning: Memory profiling only supports 'forward' or 'training' modes. Defaulting to 'forward'.")
+            profile_mode = "forward"
+        else:
+            profile_mode = args.profile_mode
+        run_memory_profile(config, profile_mode, args.memory_snapshot_path)
+    else:
+        run_benchmark(config, profile_mode=args.profile_mode)
