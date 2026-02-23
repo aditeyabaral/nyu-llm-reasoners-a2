@@ -215,7 +215,7 @@ def run_memory_profile(config: BenchmarkConfig, profile_mode: str, snapshot_path
             _ = model(input_ids)
         torch.cuda.synchronize()
     else:  # training
-        if 'optimizer' not in locals():
+        if "optimizer" not in locals():
             optimizer = AdamW(model.parameters(), lr=1e-4)
         model.zero_grad()
         with autocast_ctx:
@@ -233,7 +233,7 @@ def run_memory_profile(config: BenchmarkConfig, profile_mode: str, snapshot_path
     torch.cuda.memory._record_memory_history(enabled=None)
 
     # Report peak memory
-    peak_memory = torch.cuda.max_memory_allocated() / (1024 ** 2)  # Convert to MB
+    peak_memory = torch.cuda.max_memory_allocated() / (1024**2)  # Convert to MB
     print(f"\nPeak memory usage: {peak_memory:.2f} MB")
 
     print("\n" + "=" * 70)
