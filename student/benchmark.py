@@ -1,21 +1,23 @@
-#!/usr/bin/env python3
 """
 Benchmarking script for the Basics Transformer Language Model.
 
-This script benchmarks forward and backward passes for transformer models
-with various configurations.
+This script benchmarks forward and backward passes for transformer models with various configurations.
 """
 
 import argparse
-from html import parser
+import math
 import timeit
 from dataclasses import dataclass
 import statistics
 
 import torch
 import torch.nn as nn
+import torch.cuda.nvtx as nvtx
 
 from a1_basics.model import BasicsTransformerLM
+from a1_basics.nn_utils import softmax
+from a1_basics.optimizer import AdamW
+from einops import einsum
 
 
 MODEL_CONFIGS = {
@@ -44,7 +46,6 @@ class BenchmarkConfig:
     batch_size: int = 4
     warmup_steps: int = 5
     measurement_steps: int = 10
-    forward_only: bool = False
 
     # Device settings
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -57,6 +58,37 @@ class BenchmarkConfig:
         config = MODEL_CONFIGS[model_size].copy()
         config.update(kwargs)
         return cls(**config)
+
+
+@nvtx.range("scaled_dot_product_attention")
+def annotated_scaled_dot_product_attention(Q, K, V, mask=None):
+    """
+    Scaled dot-product attention with NVTX annotations for profiling.
+    This replaces the original function to enable detailed profiling of attention components.
+    """
+    d_k = K.shape[-1]
+
+    with nvtx.range("attention_matmul_qk"):
+        attention_scores = einsum(Q, K, "... query d_k, ... key d_k -> ... query key") / math.sqrt(d_k)
+
+    if mask is not None:
+        with nvtx.range("attention_mask"):
+            attention_scores = torch.where(mask, attention_scores, float("-inf"))
+
+    with nvtx.range("attention_softmax"):
+        attention_weights = softmax(attention_scores, dim=-1)
+
+    with nvtx.range("attention_matmul_v"):
+        output = einsum(attention_weights, V, "... query key, ... key d_v -> ... query d_v")
+
+    return output
+
+
+def enable_attention_profiling():
+    """Monkey-patch the attention function with NVTX-annotated version."""
+    import a1_basics.model as model_module
+
+    model_module.scaled_dot_product_attention = annotated_scaled_dot_product_attention
 
 
 def print_gpu_specs():
@@ -108,20 +140,22 @@ def benchmark_forward(model: nn.Module, input_ids: torch.Tensor, config: Benchma
     times = []
 
     # Warmup
-    for _ in range(config.warmup_steps):
-        with torch.no_grad():
-            _ = model(input_ids)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+    with nvtx.range("warmup_forward"):
+        for _ in range(config.warmup_steps):
+            with torch.no_grad():
+                _ = model(input_ids)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
 
     # Measurement
     for _ in range(config.measurement_steps):
-        start = timeit.default_timer()
-        with torch.no_grad():
-            _ = model(input_ids)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        end = timeit.default_timer()
+        with nvtx.range("forward_iteration"):
+            start = timeit.default_timer()
+            with torch.no_grad():
+                _ = model(input_ids)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            end = timeit.default_timer()
         times.append((end - start) * 1000)  # Convert to ms
 
     mean_time = statistics.mean(times)
@@ -141,24 +175,28 @@ def benchmark_forward_backward(
     times = []
 
     # Warmup
-    for _ in range(config.warmup_steps):
-        model.zero_grad()
-        logits = model(input_ids)
-        loss = logits.sum()
-        loss.backward()
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+    with nvtx.range("warmup_forward_backward"):
+        for _ in range(config.warmup_steps):
+            model.zero_grad()
+            logits = model(input_ids)
+            loss = logits.sum()
+            loss.backward()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
 
     # Measurement
     for _ in range(config.measurement_steps):
         model.zero_grad()
-        start = timeit.default_timer()
-        logits = model(input_ids)
-        loss = logits.sum()
-        loss.backward()
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        end = timeit.default_timer()
+        with nvtx.range("forward_backward_iteration"):
+            start = timeit.default_timer()
+            with nvtx.range("forward_pass"):
+                logits = model(input_ids)
+                loss = logits.sum()
+            with nvtx.range("backward_pass"):
+                loss.backward()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            end = timeit.default_timer()
         times.append((end - start) * 1000)  # Convert to ms
 
     mean_time = statistics.mean(times)
@@ -166,8 +204,59 @@ def benchmark_forward_backward(
     return mean_time, std_time
 
 
-def run_benchmark(config: BenchmarkConfig):
-    """Run the complete benchmark."""
+def benchmark_training_step(model: nn.Module, input_ids: torch.Tensor, config: BenchmarkConfig) -> tuple[float, float]:
+    """
+    Benchmark a complete training step: forward + backward + optimizer step.
+
+    Returns:
+        Tuple of (mean_time_ms, std_time_ms)
+    """
+    times = []
+
+    # Create optimizer
+    optimizer = AdamW(model.parameters(), lr=1e-4)
+
+    # Warmup
+    with nvtx.range("warmup_training_step"):
+        for _ in range(config.warmup_steps):
+            model.zero_grad()
+            logits = model(input_ids)
+            loss = logits.sum()
+            loss.backward()
+            optimizer.step()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+
+    # Measurement
+    for _ in range(config.measurement_steps):
+        with nvtx.range("training_step_iteration"):
+            start = timeit.default_timer()
+            model.zero_grad()
+            with nvtx.range("forward_pass"):
+                logits = model(input_ids)
+                loss = logits.sum()
+            with nvtx.range("backward_pass"):
+                loss.backward()
+            with nvtx.range("optimizer_step"):
+                optimizer.step()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            end = timeit.default_timer()
+        times.append((end - start) * 1000)  # Convert to ms
+
+    mean_time = statistics.mean(times)
+    std_time = statistics.stdev(times) if len(times) > 1 else 0.0
+    return mean_time, std_time
+
+
+def run_benchmark(config: BenchmarkConfig, profile_mode: str = "all"):
+    """
+    Run the complete benchmark.
+
+    Args:
+        config: Benchmark configuration
+        profile_mode: One of "forward", "backward", "training", "all"
+    """
     print("\n" + "=" * 70)
     print("TRANSFORMER MODEL BENCHMARKING")
     print("=" * 70)
@@ -186,7 +275,7 @@ def run_benchmark(config: BenchmarkConfig):
     print(f"  batch_size:        {config.batch_size}")
     print(f"  warmup_steps:      {config.warmup_steps}")
     print(f"  measurement_steps: {config.measurement_steps}")
-    print(f"  forward_only:      {config.forward_only}")
+    print(f"  profile_mode:      {profile_mode}")
     print(f"  device:            {config.device}")
 
     # Create model and data
@@ -203,27 +292,38 @@ def run_benchmark(config: BenchmarkConfig):
     print("RESULTS")
     print("-" * 70)
 
-    # Forward pass
-    print("\nBenchmarking forward pass...")
-    fwd_mean, fwd_std = benchmark_forward(model, input_ids, config)
-    print(f"  Forward pass: {fwd_mean:.2f} ± {fwd_std:.2f} ms")
+    results = {}
 
-    if not config.forward_only:
-        # Forward + Backward pass
+    # Forward pass
+    if profile_mode in ("forward", "all"):
+        print("\nBenchmarking forward pass...")
+        fwd_mean, fwd_std = benchmark_forward(model, input_ids, config)
+        print(f"  Forward pass: {fwd_mean:.2f} ± {fwd_std:.2f} ms")
+        results["forward_mean"] = fwd_mean
+        results["forward_std"] = fwd_std
+
+    # Forward + Backward pass
+    if profile_mode in ("backward", "all"):
         print("\nBenchmarking forward + backward pass...")
         fwd_bwd_mean, fwd_bwd_std = benchmark_forward_backward(model, input_ids, config)
         print(f"  Forward + Backward: {fwd_bwd_mean:.2f} ± {fwd_bwd_std:.2f} ms")
-        # Estimate backward-only time
-        bwd_mean = fwd_bwd_mean - fwd_mean
-        print(f"  Backward (estimated): {bwd_mean:.2f} ms")
-    print("\n" + "=" * 70)
+        results["forward_backward_mean"] = fwd_bwd_mean
+        results["forward_backward_std"] = fwd_bwd_std
 
-    return {
-        "forward_mean": fwd_mean,
-        "forward_std": fwd_std,
-        "forward_backward_mean": fwd_bwd_mean if not config.forward_only else None,
-        "forward_backward_std": fwd_bwd_std if not config.forward_only else None,
-    }
+        if "forward_mean" in results:
+            bwd_mean = fwd_bwd_mean - results["forward_mean"]
+            print(f"  Backward (estimated): {bwd_mean:.2f} ms")
+
+    # Full training step
+    if profile_mode in ("training", "all"):
+        print("\nBenchmarking full training step (forward + backward + optimizer)...")
+        train_mean, train_std = benchmark_training_step(model, input_ids, config)
+        print(f"  Training step: {train_mean:.2f} ± {train_std:.2f} ms")
+        results["training_step_mean"] = train_mean
+        results["training_step_std"] = train_std
+
+    print("\n" + "=" * 70)
+    return results
 
 
 def parse_args():
@@ -254,8 +354,23 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size")
     parser.add_argument("--warmup-steps", type=int, default=5, help="Number of warmup steps")
     parser.add_argument("--measurement-steps", type=int, default=10, help="Number of measurement steps")
-    parser.add_argument("--forward-only", action="store_true", help="Only benchmark forward pass")
     parser.add_argument("--no-warmup", action="store_true", help="Skip warmup steps (for comparison)")
+
+    # Profile mode
+    parser.add_argument(
+        "--profile-mode",
+        type=str,
+        choices=["forward", "backward", "training", "all"],
+        default="all",
+        help="What to benchmark: forward only, forward+backward, full training step, or all",
+    )
+
+    # Attention profiling
+    parser.add_argument(
+        "--profile-attention",
+        action="store_true",
+        help="Enable detailed NVTX profiling of attention components (softmax, matmul)",
+    )
 
     # Device and seed
     parser.add_argument(
@@ -277,6 +392,11 @@ if __name__ == "__main__":
     # Set random seed
     torch.manual_seed(args.seed)
 
+    # Enable attention profiling if requested
+    if args.profile_attention:
+        print("Enabling detailed attention profiling...")
+        enable_attention_profiling()
+
     # Print GPU specs
     print_gpu_specs()
 
@@ -284,13 +404,12 @@ if __name__ == "__main__":
     if args.model_size:
         config_kwargs = MODEL_CONFIGS[args.model_size].copy()
     else:
-        # Override with any explicitly provided arguments
-
-        config_kwargs = {}
-        config_kwargs["d_model"] = args.d_model
-        config_kwargs["num_layers"] = args.num_layers
-        config_kwargs["num_heads"] = args.num_heads
-        config_kwargs["d_ff"] = args.d_ff
+        config_kwargs = {
+            "d_model": args.d_model,
+            "num_layers": args.num_layers,
+            "num_heads": args.num_heads,
+            "d_ff": args.d_ff,
+        }
 
     config = BenchmarkConfig(
         vocab_size=args.vocab_size,
@@ -299,9 +418,8 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         warmup_steps=0 if args.no_warmup else args.warmup_steps,
         measurement_steps=args.measurement_steps,
-        forward_only=args.forward_only,
         device=args.device,
         **config_kwargs,
     )
 
-    run_benchmark(config)
+    run_benchmark(config, profile_mode=args.profile_mode)
