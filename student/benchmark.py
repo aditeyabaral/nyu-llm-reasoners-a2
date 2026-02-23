@@ -5,129 +5,20 @@ This script benchmarks forward and backward passes for transformer models with v
 """
 
 import argparse
-import math
 import timeit
-from dataclasses import dataclass
+
 import statistics
 
 import torch
 import torch.nn as nn
 import torch.cuda.nvtx as nvtx
 
-from a1_basics.model import BasicsTransformerLM
-from a1_basics.nn_utils import softmax
 from a1_basics.optimizer import AdamW
-from einops import einsum
 
-
-MODEL_CONFIGS = {
-    "small": {"d_model": 768, "d_ff": 3072, "num_layers": 12, "num_heads": 12},
-    "medium": {"d_model": 1024, "d_ff": 4096, "num_layers": 24, "num_heads": 16},
-    "large": {"d_model": 1280, "d_ff": 5120, "num_layers": 36, "num_heads": 20},
-    "xl": {"d_model": 1600, "d_ff": 6400, "num_layers": 48, "num_heads": 25},
-    "2.7B": {"d_model": 2560, "d_ff": 10240, "num_layers": 32, "num_heads": 32},
-}
-
-
-@dataclass
-class BenchmarkConfig:
-    """Configuration for benchmarking."""
-
-    # Model architecture
-    vocab_size: int = 10000
-    context_length: int = 512
-    d_model: int = 768
-    num_layers: int = 12
-    num_heads: int = 12
-    d_ff: int = 3072
-    rope_theta: float = 10000.0
-
-    # Benchmarking settings
-    batch_size: int = 4
-    warmup_steps: int = 5
-    measurement_steps: int = 10
-
-    # Device settings
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
-
-    @classmethod
-    def from_model_size(cls, model_size: str, **kwargs):
-        """Create config from a predefined model size."""
-        if model_size not in MODEL_CONFIGS:
-            raise ValueError(f"Unknown model size: {model_size}. Choose from {list(MODEL_CONFIGS.keys())}")
-        config = MODEL_CONFIGS[model_size].copy()
-        config.update(kwargs)
-        return cls(**config)
-
-
-@nvtx.range("scaled_dot_product_attention")
-def annotated_scaled_dot_product_attention(Q, K, V, mask=None):
-    """
-    Scaled dot-product attention with NVTX annotations for profiling.
-    This replaces the original function to enable detailed profiling of attention components.
-    """
-    d_k = K.shape[-1]
-
-    with nvtx.range("attention_matmul_qk"):
-        attention_scores = einsum(Q, K, "... query d_k, ... key d_k -> ... query key") / math.sqrt(d_k)
-
-    if mask is not None:
-        with nvtx.range("attention_mask"):
-            attention_scores = torch.where(mask, attention_scores, float("-inf"))
-
-    with nvtx.range("attention_softmax"):
-        attention_weights = softmax(attention_scores, dim=-1)
-
-    with nvtx.range("attention_matmul_v"):
-        output = einsum(attention_weights, V, "... query key, ... key d_v -> ... query d_v")
-
-    return output
-
-
-def enable_attention_profiling():
-    """Monkey-patch the attention function with NVTX-annotated version."""
-    import a1_basics.model as model_module
-
-    model_module.scaled_dot_product_attention = annotated_scaled_dot_product_attention
-
-
-def print_gpu_specs():
-    """Print GPU specifications if available."""
-    if not torch.cuda.is_available():
-        print("No CUDA devices available. Running on CPU.")
-        return
-    num_devices = torch.cuda.device_count()
-    print(f"\n{num_devices} CUDA device(s) available")
-    for i in range(num_devices):
-        properties = torch.cuda.get_device_properties(i)
-        print(f"  Device {i}: {properties.name}")
-        print(f"    Total memory: {properties.total_memory / 1e9:.2f} GB")
-        print(f"    Multiprocessors: {properties.multi_processor_count}")
-
-
-def create_model(config: BenchmarkConfig) -> nn.Module:
-    """Create a transformer model with the given configuration."""
-    model = BasicsTransformerLM(
-        vocab_size=config.vocab_size,
-        context_length=config.context_length,
-        d_model=config.d_model,
-        num_layers=config.num_layers,
-        num_heads=config.num_heads,
-        d_ff=config.d_ff,
-        rope_theta=config.rope_theta,
-    )
-    model = model.to(config.device)
-    return model
-
-
-def create_random_batch(config: BenchmarkConfig) -> torch.Tensor:
-    """Create a random batch of token IDs."""
-    return torch.randint(
-        low=0,
-        high=config.vocab_size,
-        size=(config.batch_size, config.context_length),
-        device=config.device,
-    )
+from student.config import BenchmarkConfig, MODEL_CONFIGS
+from student.utils import get_autocast_context, print_gpu_specs
+from student.model import create_model, create_random_batch
+from student.attention import enable_attention_profiling
 
 
 def benchmark_forward(model: nn.Module, input_ids: torch.Tensor, config: BenchmarkConfig) -> tuple[float, float]:
@@ -138,11 +29,12 @@ def benchmark_forward(model: nn.Module, input_ids: torch.Tensor, config: Benchma
         Tuple of (mean_time_ms, std_time_ms)
     """
     times = []
+    autocast_ctx = get_autocast_context(config)
 
     # Warmup
     with nvtx.range("warmup_forward"):
         for _ in range(config.warmup_steps):
-            with torch.no_grad():
+            with torch.no_grad(), autocast_ctx:
                 _ = model(input_ids)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -151,7 +43,7 @@ def benchmark_forward(model: nn.Module, input_ids: torch.Tensor, config: Benchma
     for _ in range(config.measurement_steps):
         with nvtx.range("forward_iteration"):
             start = timeit.default_timer()
-            with torch.no_grad():
+            with torch.no_grad(), autocast_ctx:
                 _ = model(input_ids)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -173,13 +65,15 @@ def benchmark_forward_backward(
         Tuple of (mean_time_ms, std_time_ms)
     """
     times = []
+    autocast_ctx = get_autocast_context(config)
 
     # Warmup
     with nvtx.range("warmup_forward_backward"):
         for _ in range(config.warmup_steps):
             model.zero_grad()
-            logits = model(input_ids)
-            loss = logits.sum()
+            with autocast_ctx:
+                logits = model(input_ids)
+                loss = logits.sum()
             loss.backward()
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -189,7 +83,7 @@ def benchmark_forward_backward(
         model.zero_grad()
         with nvtx.range("forward_backward_iteration"):
             start = timeit.default_timer()
-            with nvtx.range("forward_pass"):
+            with nvtx.range("forward_pass"), autocast_ctx:
                 logits = model(input_ids)
                 loss = logits.sum()
             with nvtx.range("backward_pass"):
@@ -212,6 +106,7 @@ def benchmark_training_step(model: nn.Module, input_ids: torch.Tensor, config: B
         Tuple of (mean_time_ms, std_time_ms)
     """
     times = []
+    autocast_ctx = get_autocast_context(config)
 
     # Create optimizer
     optimizer = AdamW(model.parameters(), lr=1e-4)
@@ -220,8 +115,9 @@ def benchmark_training_step(model: nn.Module, input_ids: torch.Tensor, config: B
     with nvtx.range("warmup_training_step"):
         for _ in range(config.warmup_steps):
             model.zero_grad()
-            logits = model(input_ids)
-            loss = logits.sum()
+            with autocast_ctx:
+                logits = model(input_ids)
+                loss = logits.sum()
             loss.backward()
             optimizer.step()
             if torch.cuda.is_available():
@@ -232,7 +128,7 @@ def benchmark_training_step(model: nn.Module, input_ids: torch.Tensor, config: B
         with nvtx.range("training_step_iteration"):
             start = timeit.default_timer()
             model.zero_grad()
-            with nvtx.range("forward_pass"):
+            with nvtx.range("forward_pass"), autocast_ctx:
                 logits = model(input_ids)
                 loss = logits.sum()
             with nvtx.range("backward_pass"):
@@ -275,6 +171,7 @@ def run_benchmark(config: BenchmarkConfig, profile_mode: str = "all"):
     print(f"  batch_size:        {config.batch_size}")
     print(f"  warmup_steps:      {config.warmup_steps}")
     print(f"  measurement_steps: {config.measurement_steps}")
+    print(f"  mixed_precision:   {config.mixed_precision}")
     print(f"  profile_mode:      {profile_mode}")
     print(f"  device:            {config.device}")
 
@@ -356,6 +253,15 @@ def parse_args():
     parser.add_argument("--measurement-steps", type=int, default=10, help="Number of measurement steps")
     parser.add_argument("--no-warmup", action="store_true", help="Skip warmup steps (for comparison)")
 
+    # Mixed precision
+    parser.add_argument(
+        "--mixed-precision",
+        type=str,
+        choices=["fp32", "fp16", "bf16"],
+        default="fp32",
+        help="Mixed precision mode: fp32 (full precision), fp16, or bf16",
+    )
+
     # Profile mode
     parser.add_argument(
         "--profile-mode",
@@ -418,6 +324,7 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         warmup_steps=0 if args.no_warmup else args.warmup_steps,
         measurement_steps=args.measurement_steps,
+        mixed_precision=args.mixed_precision,
         device=args.device,
         **config_kwargs,
     )
