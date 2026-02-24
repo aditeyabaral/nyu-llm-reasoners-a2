@@ -238,19 +238,19 @@ def run_memory_profile(config: BenchmarkConfig, profile_mode: str, snapshot_path
 
     print("\n" + "=" * 70)
     print(f"Memory snapshot saved to: {snapshot_path}")
-    print("Visualize at: https://pytorch.org/memory_viz")
     print("=" * 70)
 
     return {"peak_memory_mb": peak_memory}
 
 
-def run_benchmark(config: BenchmarkConfig, profile_mode: str = "all"):
+def run_benchmark(config: BenchmarkConfig, profile_mode: str = "all", use_compile: bool = False):
     """
     Run the complete benchmark.
 
     Args:
         config: Benchmark configuration
         profile_mode: One of "forward", "backward", "training", "all"
+        use_compile: Whether to compile the model with torch.compile
     """
     print("\n" + "=" * 70)
     print("TRANSFORMER MODEL BENCHMARKING")
@@ -271,6 +271,7 @@ def run_benchmark(config: BenchmarkConfig, profile_mode: str = "all"):
     print(f"  warmup_steps:      {config.warmup_steps}")
     print(f"  measurement_steps: {config.measurement_steps}")
     print(f"  mixed_precision:   {config.mixed_precision}")
+    print(f"  compile:           {use_compile}")
     print(f"  profile_mode:      {profile_mode}")
     print(f"  device:            {config.device}")
 
@@ -279,6 +280,11 @@ def run_benchmark(config: BenchmarkConfig, profile_mode: str = "all"):
     model = create_model(config)
     num_params = sum(p.numel() for p in model.parameters())
     print(f"  Total parameters: {num_params:,} ({num_params / 1e6:.2f}M)")
+
+    # Compile model if requested
+    if use_compile:
+        print("\nCompiling model with torch.compile...")
+        model = torch.compile(model)
 
     print("\nCreating random batch...")
     input_ids = create_random_batch(config)
@@ -361,6 +367,13 @@ def parse_args():
         help="Mixed precision mode: fp32 (full precision), fp16, or bf16",
     )
 
+    # Compile
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        help="Compile the model with torch.compile",
+    )
+
     # Profile mode
     parser.add_argument(
         "--profile-mode",
@@ -409,6 +422,9 @@ if __name__ == "__main__":
 
     # Set random seed
     torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+        torch.set_float32_matmul_precision("high")
 
     # Enable attention profiling if requested
     if args.profile_attention:
@@ -450,4 +466,4 @@ if __name__ == "__main__":
             profile_mode = args.profile_mode
         run_memory_profile(config, profile_mode, args.memory_snapshot_path)
     else:
-        run_benchmark(config, profile_mode=args.profile_mode)
+        run_benchmark(config, profile_mode=args.profile_mode, use_compile=args.compile)
