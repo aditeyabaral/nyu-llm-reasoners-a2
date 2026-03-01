@@ -178,8 +178,7 @@ class FlashAttention(torch.autograd.Function):
     """
     FlashAttention-2 autograd Function.
 
-    Forward pass uses tiled online softmax.
-    Backward pass uses recomputation with torch.compile.
+    Forward pass uses tiled online softmax. Backward pass uses recomputation with torch.compile.
     """
 
     @staticmethod

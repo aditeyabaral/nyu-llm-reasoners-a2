@@ -1,5 +1,9 @@
 """
 FlashAttention-2 Triton kernel implementation.
+
+This module provides:
+1. Triton kernel for FlashAttention-2 forward pass
+2. Autograd Function that uses the Triton kernel
 """
 
 import math
@@ -8,7 +12,11 @@ import triton
 import triton.language as tl
 from triton import cdiv
 
-from student.flash_attention import flash_attention_backward_compiled
+# Import backward function - handle both direct and package imports
+try:
+    from student.flash_attention import flash_attention_backward_compiled
+except ImportError:
+    from flash_attention import flash_attention_backward_compiled
 
 
 @triton.jit
@@ -143,7 +151,8 @@ def flash_fwd_kernel(
         li_new = tl.exp(mi - mi_new) * li + tl.sum(Pij_tilde, axis=1)
 
         # O_new = exp(m_old - m_new) * O_old + P_tilde @ Vj
-        Oi = tl.exp(mi - mi_new)[:, None] * Oi + tl.dot(Pij_tilde.to(Vj.dtype), Vj.to(tl.float32))
+        # Both operands must have same dtype for tl.dot
+        Oi = tl.exp(mi - mi_new)[:, None] * Oi + tl.dot(Pij_tilde, Vj.to(tl.float32))
 
         # Update running values
         mi = mi_new
@@ -169,7 +178,7 @@ class FlashAttentionTriton(torch.autograd.Function):
     FlashAttention-2 autograd Function using Triton kernel.
 
     Forward pass uses Triton kernel.
-    Backward pass uses recomputation with torch.compile.
+    Backward pass uses recomputation with torch.compile (from flash_attention.py).
     """
 
     @staticmethod
@@ -204,10 +213,16 @@ class FlashAttentionTriton(torch.autograd.Function):
         L = torch.empty(batch_size, n_queries, device=Q.device, dtype=Q.dtype)
 
         # Tile sizes (must be powers of 2 and at least 16)
-        Q_TILE_SIZE = 64
-        K_TILE_SIZE = 64
+        # Reduce tile sizes for larger D to stay within shared memory limits
+        if d <= 64:
+            Q_TILE_SIZE = 64
+            K_TILE_SIZE = 64
+        else:
+            # For d=128, use smaller tiles to fit in shared memory
+            Q_TILE_SIZE = 32
+            K_TILE_SIZE = 32
 
-        # Adjust tile sizes for small dimensions
+        # Adjust tile sizes for small sequence lengths
         if n_queries < Q_TILE_SIZE:
             Q_TILE_SIZE = triton.next_power_of_2(n_queries)
         if n_keys < K_TILE_SIZE:
@@ -266,5 +281,7 @@ class FlashAttentionTriton(torch.autograd.Function):
         """
         Q, K, V, O, L = ctx.saved_tensors
         is_causal = ctx.is_causal
+
         dQ, dK, dV = flash_attention_backward_compiled(Q, K, V, O, dO, L, is_causal)
+
         return dQ, dK, dV, None
