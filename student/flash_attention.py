@@ -111,7 +111,7 @@ def flash_attention_forward_tiled(
     return O, L
 
 
-# @torch.compile
+@torch.compile
 def flash_attention_backward_compiled(
     Q: Tensor,
     K: Tensor,
