@@ -213,14 +213,17 @@ class FlashAttentionTriton(torch.autograd.Function):
         L = torch.empty(batch_size, n_queries, device=Q.device, dtype=Q.dtype)
 
         # Tile sizes (must be powers of 2 and at least 16)
-        # Reduce tile sizes for larger D to stay within shared memory limits
-        if d <= 64:
+        # Use conservative tile sizes for compatibility across different GPUs
+        if d <= 32:
             Q_TILE_SIZE = 64
             K_TILE_SIZE = 64
-        else:
-            # For d=128, use smaller tiles to fit in shared memory
+        elif d <= 64:
             Q_TILE_SIZE = 32
             K_TILE_SIZE = 32
+        else:
+            # For d=128, use smaller tiles to fit in shared memory
+            Q_TILE_SIZE = 16
+            K_TILE_SIZE = 16
 
         # Adjust tile sizes for small sequence lengths
         if n_queries < Q_TILE_SIZE:
