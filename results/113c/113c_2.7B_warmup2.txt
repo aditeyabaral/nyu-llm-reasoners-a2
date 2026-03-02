@@ -1,0 +1,63 @@
+
+1 CUDA device(s) available
+  Device 0: NVIDIA L40S
+    Total memory: 47.67 GB
+    Multiprocessors: 142
+
+======================================================================
+TRANSFORMER MODEL BENCHMARKING
+======================================================================
+
+Model Configuration:
+  vocab_size:     10000
+  context_length: 512
+  d_model:        2560
+  num_layers:     32
+  num_heads:      32
+  d_ff:           10240
+  rope_theta:     10000.0
+
+Benchmark Settings:
+  batch_size:        4
+  warmup_steps:      2
+  measurement_steps: 10
+  mixed_precision:   fp32
+  compile:           False
+  profile_mode:      all
+  device:            cuda
+
+Initializing model...
+  Total parameters: 3,406,809,600 (3406.81M)
+
+Creating random batch...
+
+----------------------------------------------------------------------
+RESULTS
+----------------------------------------------------------------------
+
+Benchmarking forward pass...
+  Forward pass: 282.00 ± 0.28 ms
+
+Benchmarking forward + backward pass...
+  Forward + Backward: 939.46 ± 1.41 ms
+  Backward (estimated): 657.46 ms
+
+Benchmarking backward pass only...
+  Backward only: 662.46 ± 0.80 ms
+
+Benchmarking full training step (forward + backward + optimizer)...
+Traceback (most recent call last):
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 523, in <module>
+    run_benchmark(config, profile_mode=args.profile_mode, use_compile=args.compile)
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 376, in run_benchmark
+    train_mean, train_std = benchmark_training_step(model, input_ids, config)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 170, in benchmark_training_step
+    optimizer.step()
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.11/site-packages/torch/optim/optimizer.py", line 493, in wrapper
+    out = func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/a1-basics/a1_basics/optimizer.py", line 75, in step
+    v_t = beta_2 * prev_v_t + ((1 - beta_2) * torch.square(grad))
+                               ~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 100.00 MiB. GPU 0 has a total capacity of 44.39 GiB of which 73.31 MiB is free. Including non-PyTorch memory, this process has 44.31 GiB memory in use. Of the allocated memory 42.88 GiB is allocated by PyTorch, and 952.39 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

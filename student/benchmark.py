@@ -98,6 +98,54 @@ def benchmark_forward_backward(
     return mean_time, std_time
 
 
+def benchmark_backward_only(
+    model: nn.Module, input_ids: torch.Tensor, config: BenchmarkConfig
+) -> tuple[float, float]:
+    """
+    Benchmark the backward pass only, by running forward outside the timer
+    to build the computation graph, then timing only loss.backward().
+
+    Returns:
+        Tuple of (mean_time_ms, std_time_ms)
+    """
+    times = []
+    autocast_ctx = get_autocast_context(config)
+
+    # Warmup
+    with nvtx.range("warmup_backward_only"):
+        for _ in range(config.warmup_steps):
+            model.zero_grad()
+            with autocast_ctx:
+                logits = model(input_ids)
+                loss = logits.sum()
+            loss.backward()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+
+    # Measurement
+    for _ in range(config.measurement_steps):
+        model.zero_grad()
+        # Forward pass outside the timer — just to build the computation graph
+        with autocast_ctx:
+            logits = model(input_ids)
+            loss = logits.sum()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
+        # Time only the backward pass
+        with nvtx.range("backward_only_iteration"):
+            start = timeit.default_timer()
+            loss.backward()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            end = timeit.default_timer()
+        times.append((end - start) * 1000)  # Convert to ms
+
+    mean_time = statistics.mean(times)
+    std_time = statistics.stdev(times) if len(times) > 1 else 0.0
+    return mean_time, std_time
+
+
 def benchmark_training_step(model: nn.Module, input_ids: torch.Tensor, config: BenchmarkConfig) -> tuple[float, float]:
     """
     Benchmark a complete training step: forward + backward + optimizer step.
@@ -315,6 +363,12 @@ def run_benchmark(config: BenchmarkConfig, profile_mode: str = "all", use_compil
         if "forward_mean" in results:
             bwd_mean = fwd_bwd_mean - results["forward_mean"]
             print(f"  Backward (estimated): {bwd_mean:.2f} ms")
+
+        print("\nBenchmarking backward pass only...")
+        bwd_only_mean, bwd_only_std = benchmark_backward_only(model, input_ids, config)
+        print(f"  Backward only: {bwd_only_mean:.2f} ± {bwd_only_std:.2f} ms")
+        results["backward_only_mean"] = bwd_only_mean
+        results["backward_only_std"] = bwd_only_std
 
     # Full training step
     if profile_mode in ("training", "all"):
