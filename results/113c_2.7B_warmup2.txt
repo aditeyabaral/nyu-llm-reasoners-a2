@@ -36,20 +36,23 @@ RESULTS
 ----------------------------------------------------------------------
 
 Benchmarking forward pass...
-  Forward pass: 281.46 ± 0.35 ms
+  Forward pass: 282.00 ± 0.28 ms
 
 Benchmarking forward + backward pass...
-  Forward + Backward: 938.38 ± 0.82 ms
-  Backward (estimated): 656.92 ms
+  Forward + Backward: 939.46 ± 1.41 ms
+  Backward (estimated): 657.46 ms
+
+Benchmarking backward pass only...
+  Backward only: 662.46 ± 0.80 ms
 
 Benchmarking full training step (forward + backward + optimizer)...
 Traceback (most recent call last):
-  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 469, in <module>
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 523, in <module>
     run_benchmark(config, profile_mode=args.profile_mode, use_compile=args.compile)
-  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 322, in run_benchmark
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 376, in run_benchmark
     train_mean, train_std = benchmark_training_step(model, input_ids, config)
                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 122, in benchmark_training_step
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 170, in benchmark_training_step
     optimizer.step()
   File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.11/site-packages/torch/optim/optimizer.py", line 493, in wrapper
     out = func(*args, **kwargs)

@@ -36,13 +36,16 @@ RESULTS
 ----------------------------------------------------------------------
 
 Benchmarking forward pass...
-  Forward pass: 46.83 ± 0.10 ms
+  Forward pass: 46.99 ± 0.06 ms
 
 Benchmarking forward + backward pass...
-  Forward + Backward: 171.11 ± 0.11 ms
-  Backward (estimated): 124.28 ms
+  Forward + Backward: 171.48 ± 0.09 ms
+  Backward (estimated): 124.49 ms
+
+Benchmarking backward pass only...
+  Backward only: 126.00 ± 0.13 ms
 
 Benchmarking full training step (forward + backward + optimizer)...
-  Training step: 201.70 ± 0.28 ms
+  Training step: 202.36 ± 0.38 ms
 
 ======================================================================
