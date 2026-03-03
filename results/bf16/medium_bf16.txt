@@ -1,0 +1,51 @@
+
+1 CUDA device(s) available
+  Device 0: NVIDIA L40S
+    Total memory: 47.67 GB
+    Multiprocessors: 142
+
+======================================================================
+TRANSFORMER MODEL BENCHMARKING
+======================================================================
+
+Model Configuration:
+  vocab_size:     10000
+  context_length: 512
+  d_model:        1024
+  num_layers:     24
+  num_heads:      16
+  d_ff:           4096
+  rope_theta:     10000.0
+
+Benchmark Settings:
+  batch_size:        4
+  warmup_steps:      5
+  measurement_steps: 10
+  mixed_precision:   bf16
+  compile:           False
+  profile_mode:      all
+  device:            cuda
+
+Initializing model...
+  Total parameters: 423,183,360 (423.18M)
+
+Creating random batch...
+
+----------------------------------------------------------------------
+RESULTS
+----------------------------------------------------------------------
+
+Benchmarking forward pass...
+  Forward pass: 36.22 ± 0.02 ms
+
+Benchmarking forward + backward pass...
+  Forward + Backward: 126.58 ± 0.05 ms
+  Backward (estimated): 90.36 ms
+
+Benchmarking backward pass only...
+  Backward only: 90.49 ± 0.08 ms
+
+Benchmarking full training step (forward + backward + optimizer)...
+  Training step: 157.34 ± 0.21 ms
+
+======================================================================

@@ -2,6 +2,8 @@
 
 mkdir -p results/bf16
 
+source .venv/bin/activate
+
 for size in small medium large xl 2.7B; do
     echo "--- $size ---"
     uv run student/benchmark.py \

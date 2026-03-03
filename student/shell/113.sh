@@ -2,6 +2,8 @@
 
 mkdir -p results
 
+source .venv/bin/activate
+
 echo "=========================================="
 echo "1.1.3(b): All model sizes, 5 warmup steps"
 echo "=========================================="

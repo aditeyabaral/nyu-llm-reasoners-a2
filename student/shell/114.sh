@@ -2,6 +2,8 @@
 
 mkdir -p results/nsys
 
+source .venv/bin/activate
+
 for size in small medium large xl 2.7B; do
     for ctx in 128 256 512 1024; do
         echo "--- Profiling: $size, context=$ctx ---"
