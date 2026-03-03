@@ -1,0 +1,40 @@
+
+1 CUDA device(s) available
+  Device 0: NVIDIA L40S
+    Total memory: 47.67 GB
+    Multiprocessors: 142
+
+======================================================================
+MEMORY PROFILING
+======================================================================
+
+Model Configuration:
+  vocab_size:     10000
+  context_length: 512
+  d_model:        2560
+  num_layers:     32
+  num_heads:      32
+  d_ff:           10240
+
+Memory Profile Settings:
+  profile_mode:    forward
+  mixed_precision: fp32
+  snapshot_path:   results/memory/2.7B_ctx512_forward.pickle
+
+Initializing model...
+  Total parameters: 3,406,809,600 (3406.81M)
+
+Creating random batch...
+
+Running warmup...
+
+Starting memory recording...
+Running forward pass...
+
+Saving memory snapshot to results/memory/2.7B_ctx512_forward.pickle...
+
+Peak memory usage: 13823.56 MB
+
+======================================================================
+Memory snapshot saved to: results/memory/2.7B_ctx512_forward.pickle
+======================================================================
