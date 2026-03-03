@@ -1,0 +1,40 @@
+
+1 CUDA device(s) available
+  Device 0: NVIDIA L40S
+    Total memory: 47.67 GB
+    Multiprocessors: 142
+
+======================================================================
+MEMORY PROFILING
+======================================================================
+
+Model Configuration:
+  vocab_size:     10000
+  context_length: 512
+  d_model:        1280
+  num_layers:     36
+  num_heads:      20
+  d_ff:           5120
+
+Memory Profile Settings:
+  profile_mode:    training
+  mixed_precision: fp32
+  snapshot_path:   results/memory/large_ctx512_training.pickle
+
+Initializing model...
+  Total parameters: 969,411,840 (969.41M)
+
+Creating random batch...
+
+Running warmup...
+
+Starting memory recording...
+Running training pass...
+
+Saving memory snapshot to results/memory/large_ctx512_training.pickle...
+
+Peak memory usage: 28190.20 MB
+
+======================================================================
+Memory snapshot saved to: results/memory/large_ctx512_training.pickle
+======================================================================
