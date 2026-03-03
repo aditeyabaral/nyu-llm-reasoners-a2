@@ -98,9 +98,7 @@ def benchmark_forward_backward(
     return mean_time, std_time
 
 
-def benchmark_backward_only(
-    model: nn.Module, input_ids: torch.Tensor, config: BenchmarkConfig
-) -> tuple[float, float]:
+def benchmark_backward_only(model: nn.Module, input_ids: torch.Tensor, config: BenchmarkConfig) -> tuple[float, float]:
     """
     Benchmark the backward pass only, by running forward outside the timer
     to build the computation graph, then timing only loss.backward().
