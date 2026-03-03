@@ -252,7 +252,7 @@ def run_memory_profile(config: BenchmarkConfig, profile_mode: str, snapshot_path
 
     # Start recording memory history
     print("\nStarting memory recording...")
-    torch.cuda.memory._record_memory_history(max_entries=1000000)
+    torch.cuda.memory._record_memory_history(max_entries=1000000, stacks="all")
 
     # Run single iteration for profiling
     print(f"Running {profile_mode} pass...")
