@@ -1,0 +1,116 @@
+
+1 CUDA device(s) available
+  Device 0: NVIDIA L40S
+    Total memory: 47.67 GB
+    Multiprocessors: 142
+
+======================================================================
+TRANSFORMER MODEL BENCHMARKING
+======================================================================
+
+Model Configuration:
+  vocab_size:     10000
+  context_length: 512
+  d_model:        1600
+  num_layers:     48
+  num_heads:      25
+  d_ff:           6400
+  rope_theta:     10000.0
+
+Benchmark Settings:
+  batch_size:        4
+  warmup_steps:      5
+  measurement_steps: 10
+  mixed_precision:   fp32
+  compile:           True
+  profile_mode:      all
+  device:            cuda
+
+Initializing model...
+  Total parameters: 1,998,235,200 (1998.24M)
+
+Compiling model with torch.compile...
+
+Creating random batch...
+
+----------------------------------------------------------------------
+RESULTS
+----------------------------------------------------------------------
+
+Benchmarking forward pass...
+  Forward pass: 134.68 ± 0.08 ms
+
+Benchmarking forward + backward pass...
+  Forward + Backward: 480.95 ± 0.37 ms
+  Backward (estimated): 346.28 ms
+
+Benchmarking backward pass only...
+  Backward only: 340.42 ± 0.31 ms
+
+Benchmarking full training step (forward + backward + optimizer)...
+Traceback (most recent call last):
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 521, in <module>
+    run_benchmark(config, profile_mode=args.profile_mode, use_compile=args.compile)
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 374, in run_benchmark
+    train_mean, train_std = benchmark_training_step(model, input_ids, config)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/student/benchmark.py", line 165, in benchmark_training_step
+    logits = model(input_ids)
+             ^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 574, in _fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/a1-basics/a1_basics/model.py", line 231, in forward
+    def forward(self, x: Int[Tensor, " ... sequence_length"]) -> Float[Tensor, " ... sequence_length vocab_size"]:
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 745, in _fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_functorch/aot_autograd.py", line 1184, in forward
+    return compiled_fn(full_args)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 310, in runtime_wrapper
+    all_outs = call_func_at_runtime_with_args(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/utils.py", line 126, in call_func_at_runtime_with_args
+    out = normalize_as_list(f(args))
+                            ^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/utils.py", line 100, in g
+    return f(*args)
+           ^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/autograd/function.py", line 575, in apply
+    return super().apply(*args, **kwargs)  # type: ignore[misc]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 1585, in forward
+    fw_outs = call_func_at_runtime_with_args(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/utils.py", line 126, in call_func_at_runtime_with_args
+    out = normalize_as_list(f(args))
+                            ^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 490, in wrapper
+    return compiled_fn(runtime_args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 672, in inner_fn
+    outs = compiled_fn(args)
+           ^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_inductor/output_code.py", line 466, in __call__
+    return self.current_callable(inputs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/ab12057/nyu-llm-reasoners-a2/.venv/lib64/python3.12/site-packages/torch/_inductor/utils.py", line 2128, in run
+    return model(new_inputs)
+           ^^^^^^^^^^^^^^^^^
+  File "/state/partition1/job-3237066/torchinductor_ab12057/n5/cn55cygptfp4t4iwwfbjdsgo25l5qwfgmryy6tptcf3ikgsudabu.py", line 3797, in call
+    buf1158 = empty_strided_cuda((4, 512, 6400), (3276800, 6400, 1), torch.float32)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 50.00 MiB. GPU 0 has a total capacity of 44.39 GiB of which 9.31 MiB is free. Including non-PyTorch memory, this process has 44.38 GiB memory in use. Of the allocated memory 41.65 GiB is allocated by PyTorch, and 2.23 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
